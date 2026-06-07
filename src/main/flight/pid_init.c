@@ -38,6 +38,7 @@
 #include "fc/rc.h"
 
 #include "flight/pid.h"
+#include "flight/adrc.h"
 
 #include "pg/motor.h"
 
@@ -546,6 +547,8 @@ void pidInitConfig(const pidProfile_t *pidProfile)
 #ifdef USE_WING
     tpaSpeedInit(pidProfile);
 #endif
+
+    adrcInitProfile(pidProfile);
 }
 
 void pidCopyProfile(uint8_t dstPidProfileIndex, uint8_t srcPidProfileIndex)

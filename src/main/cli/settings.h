@@ -165,6 +165,7 @@ typedef enum {
 #ifdef USE_TRANSPONDER
     TABLE_TRANSPONDER_PROVIDER,
 #endif
+    TABLE_CONTROLLER_TYPE,
     LOOKUP_TABLE_COUNT
 } lookupTableIndex_e;
 

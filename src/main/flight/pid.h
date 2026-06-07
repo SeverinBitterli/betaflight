@@ -187,6 +187,11 @@ typedef enum {
     YAW_TYPE_DIFF_THRUST,
 } yawType_e;
 
+typedef enum {
+    CONTROLLER_PID = 0,
+    CONTROLLER_ADRC,
+} controllerType_e;
+
 #define MAX_PROFILE_NAME_LENGTH 8u
 
 typedef struct pidProfile_s {
@@ -327,6 +332,14 @@ typedef struct pidProfile_s {
     uint16_t chirp_frequency_start_deci_hz; // start frequency in units of 0.1 hz
     uint16_t chirp_frequency_end_deci_hz;   // end frequency in units of 0.1 hz
     uint8_t chirp_time_seconds;             // excitation time
+
+    // ADRC controller parameters (Active Disturbance Rejection Control)
+    uint8_t controller_type;               // 0=PID, 1=ADRC (controllerType_e)
+    uint8_t adrc_eso_freq;                 // ESO bandwidth in Hz (l0=4*pi*f, l1=4*pi^2*f^2)
+    uint8_t adrc_td_freq;                  // TD bandwidth in Hz (0 disables TD, uses raw setpoint)
+    uint8_t adrc_kt[XYZ_AXIS_COUNT];         // Per-axis tracking gain in 1/s [roll, pitch, yaw]
+    uint8_t adrc_alpha_hat[XYZ_AXIS_COUNT];  // Per-axis system gain at hover (deg/s^2 per mixer unit) [roll, pitch, yaw]
+    uint8_t adrc_hover_throttle;             // Throttle % at hover (0-100); alpha scales as (thr/hover_thr)^2
 } pidProfile_t;
 
 PG_DECLARE_ARRAY(pidProfile_t, PID_PROFILE_COUNT, pidProfiles);

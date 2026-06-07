@@ -453,6 +453,10 @@ static const char * const lookupTableLaunchControlMode[] = {
 };
 #endif
 
+static const char * const lookupTableControllerType[] = {
+    "PID", "ADRC",
+};
+
 static const char * const lookupTableTpaMode[] = {
     "PD", "D",
 #ifdef USE_WING
@@ -724,6 +728,7 @@ const lookupTableEntry_t lookupTables[] = {
 #ifdef USE_TRANSPONDER
     LOOKUP_TABLE_ENTRY(lookupTableTransponderProvider),
 #endif
+    LOOKUP_TABLE_ENTRY(lookupTableControllerType),
 };
 
 #undef LOOKUP_TABLE_ENTRY
@@ -1375,6 +1380,18 @@ const clivalue_t valueTable[] = {
     { PARAM_NAME_TPA_LOW_RATE,            VAR_INT8  | PROFILE_VALUE, .config.minmax = { TPA_LOW_RATE_MIN, TPA_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, tpa_low_rate) },
     { PARAM_NAME_TPA_LOW_BREAKPOINT,      VAR_UINT16 | PROFILE_VALUE, .config.minmaxUnsigned = { PWM_RANGE_MIN, PWM_RANGE_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, tpa_low_breakpoint) },
     { PARAM_NAME_TPA_LOW_ALWAYS, VAR_UINT8  | PROFILE_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_OFF_ON }, PG_PID_PROFILE, offsetof(pidProfile_t, tpa_low_always) },
+
+    // ADRC controller parameters
+    { "controller_type",  VAR_UINT8  | PROFILE_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_CONTROLLER_TYPE }, PG_PID_PROFILE, offsetof(pidProfile_t, controller_type) },
+    { "adrc_eso_freq",    VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 1, 200 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_eso_freq) },
+    { "adrc_td_freq",     VAR_UINT8  | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 200 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_td_freq) },
+    { "adrc_kt_roll",           VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, PID_GAIN_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_kt[FD_ROLL]) },
+    { "adrc_kt_pitch",          VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, PID_GAIN_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_kt[FD_PITCH]) },
+    { "adrc_kt_yaw",            VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, PID_GAIN_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_kt[FD_YAW]) },
+    { "adrc_alpha_hat_roll",    VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 1, 250 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_alpha_hat[FD_ROLL]) },
+    { "adrc_alpha_hat_pitch",   VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 1, 250 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_alpha_hat[FD_PITCH]) },
+    { "adrc_alpha_hat_yaw",     VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 1, 250 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_alpha_hat[FD_YAW]) },
+    { "adrc_hover_throttle",    VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 5, 95  }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_hover_throttle) },
 
 #ifdef USE_WING
     { PARAM_NAME_TPA_SPEED_TYPE, VAR_UINT8 | PROFILE_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_TPA_SPEED_TYPE }, PG_PID_PROFILE, offsetof(pidProfile_t, tpa_speed_type) },

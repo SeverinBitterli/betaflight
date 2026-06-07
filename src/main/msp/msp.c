@@ -2111,6 +2111,17 @@ case MSP_NAME:
         sbufWriteU8(dst, currentPidProfile->tpa_mode);
         sbufWriteU8(dst, currentPidProfile->tpa_rate);
         sbufWriteU16(dst, currentPidProfile->tpa_breakpoint);   // was currentControlRateProfile->tpa_breakpoint
+        // Added in MSP API 1.49 - ADRC controller (8 bytes)
+        sbufWriteU8(dst, currentPidProfile->controller_type);
+        sbufWriteU8(dst, currentPidProfile->adrc_eso_freq);
+        sbufWriteU8(dst, currentPidProfile->adrc_td_freq);
+        sbufWriteU8(dst, currentPidProfile->adrc_kt[FD_ROLL]);
+        sbufWriteU8(dst, currentPidProfile->adrc_kt[FD_PITCH]);
+        sbufWriteU8(dst, currentPidProfile->adrc_kt[FD_YAW]);
+        sbufWriteU8(dst, currentPidProfile->adrc_alpha_hat[FD_ROLL]);
+        sbufWriteU8(dst, currentPidProfile->adrc_alpha_hat[FD_PITCH]);
+        sbufWriteU8(dst, currentPidProfile->adrc_alpha_hat[FD_YAW]);
+        sbufWriteU8(dst, currentPidProfile->adrc_hover_throttle);
         break;
 
     case MSP_SENSOR_CONFIG:
@@ -3516,6 +3527,23 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
             currentPidProfile->tpa_mode = sbufReadU8(src);
             currentPidProfile->tpa_rate = MIN(sbufReadU8(src), TPA_MAX);
             currentPidProfile->tpa_breakpoint = sbufReadU16(src);
+        }
+        if (sbufBytesRemaining(src) >= 3) {
+            // Added in MSP API 1.49 - ADRC controller (8 bytes total)
+            currentPidProfile->controller_type = sbufReadU8(src);
+            currentPidProfile->adrc_eso_freq   = sbufReadU8(src);
+            currentPidProfile->adrc_td_freq    = sbufReadU8(src);
+        }
+        if (sbufBytesRemaining(src) >= 6) {
+            currentPidProfile->adrc_kt[FD_ROLL]          = sbufReadU8(src);
+            currentPidProfile->adrc_kt[FD_PITCH]         = sbufReadU8(src);
+            currentPidProfile->adrc_kt[FD_YAW]           = sbufReadU8(src);
+            currentPidProfile->adrc_alpha_hat[FD_ROLL]   = sbufReadU8(src);
+            currentPidProfile->adrc_alpha_hat[FD_PITCH]  = sbufReadU8(src);
+            currentPidProfile->adrc_alpha_hat[FD_YAW]    = sbufReadU8(src);
+        }
+        if (sbufBytesRemaining(src) >= 1) {
+            currentPidProfile->adrc_hover_throttle = sbufReadU8(src);
         }
 
         pidInitConfig(currentPidProfile);

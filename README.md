@@ -5,6 +5,71 @@
 
 Betaflight is flight controller software (firmware) used to fly multi-rotor craft and fixed wing craft. Betaflight focuses on flight performance, leading-edge feature additions, and wide target support.
 
+---
+
+## ADRC Rate Controller (`ADRC-Implementation` branch)
+
+This branch adds an **Active Disturbance Rejection Control (ADRC)** rate controller as a drop-in alternative to the standard PID controller. ADRC replaces the I-term with an Extended State Observer (ESO) that estimates and cancels lumped disturbances (wind, gyro bias, model error) in real time, giving faster disturbance rejection without the windup behaviour of a traditional integrator.
+
+Based on: *Chebbi & Brière, "Robust active disturbance rejection control for systems with internal uncertainties: Multirotor UAV application", Journal of Field Robotics 39(4), 426-456, 2022.*
+
+### Enabling ADRC
+
+Connect via Betaflight Configurator CLI and run:
+
+```
+set controller_type = ADRC
+save
+```
+
+Switch back to PID at any time with `set controller_type = PID`.
+
+### Parameters
+
+| CLI parameter | Default | Description |
+|---|---|---|
+| `controller_type` | `PID` | `PID` or `ADRC` |
+| `adrc_eso_freq` | `20` | ESO bandwidth in Hz — controls how fast disturbances are estimated |
+| `adrc_td_freq` | `0` | Tracking Differentiator bandwidth in Hz (0 = disabled) |
+| `adrc_kt_roll/pitch/yaw` | `60/60/40` | Per-axis tracking gain (1/s) — equivalent feel to PID P gain |
+| `adrc_alpha_hat_roll/pitch/yaw` | `40/40/30` | Per-axis estimated system gain at hover (deg/s² per mixer unit) |
+| `adrc_hover_throttle` | `28` | Throttle % at which the drone hovers — used to scale alpha with throttle² |
+
+### Tuning Guide
+
+1. **Find hover throttle** — arm the drone, increase throttle until it just lifts off and holds altitude steadily. Note the stick percentage and set `adrc_hover_throttle` to that value.
+
+2. **Set `adrc_alpha_hat`** — derived from your existing PID P gain: `alpha_hat = adrc_kt / Kp` where `Kp = 0.032029 × P_value`. For P=45: `alpha_hat = 60 / (0.032029×45) ≈ 42`.
+
+3. **Tune `adrc_kt`** — increase for sharper tracking (like raising P), decrease for softer feel.
+
+4. **Tune `adrc_eso_freq`** — increase for faster disturbance rejection, decrease if oscillations appear.
+
+### Architecture
+
+```
+getSetpointRate() ──► Tracking Differentiator ──► v_ref, v_ref_dot
+                                                        │
+gyro.gyroADCf[]  ──► Extended State Observer  ──► sigma_hat (disturbance estimate)
+                              │                         │
+                              └──────────────► Control Law (Eq.15) ──► pidData[].Sum ──► Mixer
+```
+
+The ESO uses a throttle-dependent plant model (`alpha ∝ throttle²`) to avoid instability at low throttle during takeoff.
+
+### Simulation
+
+A closed-loop Python simulation is included for validating parameters before flying:
+
+```bash
+cd /workspaces/Betaflight
+python3 tools/adrc_simulation.py
+```
+
+Edit the `P` dict at the top of the script to match your CLI settings.
+
+---
+
 ## Release Schedule
 
 | Date       | Release | Stage             | Status    |

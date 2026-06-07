@@ -6,8 +6,8 @@
   },
   "privileged": true,
   "runArgs": [
-    //  "--userns=host", // <== use this for docker
-     "--userns=keep-id", // <== use this for podman
+     "--userns=host", // <== use this for docker
+    //  "--userns=keep-id", // <== use this for podman
      "--volume=/dev:/dev"
   ],
   "remoteUser": "devpod",

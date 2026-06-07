@@ -62,6 +62,7 @@
 #include "sensors/gyro.h"
 
 #include "pid.h"
+#include "adrc.h"
 
 typedef enum {
     LEVEL_MODE_OFF = 0,
@@ -119,7 +120,7 @@ PG_RESET_TEMPLATE(pidConfig_t, pidConfig,
 #define IS_AXIS_IN_ANGLE_MODE(i) false
 #endif // USE_ACC
 
-PG_REGISTER_ARRAY_WITH_RESET_FN(pidProfile_t, PID_PROFILE_COUNT, pidProfiles, PG_PID_PROFILE, 11);
+PG_REGISTER_ARRAY_WITH_RESET_FN(pidProfile_t, PID_PROFILE_COUNT, pidProfiles, PG_PID_PROFILE, 12);
 
 void resetPidProfile(pidProfile_t *pidProfile)
 {
@@ -257,6 +258,12 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .chirp_frequency_start_deci_hz = 2,
         .chirp_frequency_end_deci_hz = 6000,
         .chirp_time_seconds = 20,
+        .controller_type = CONTROLLER_PID,
+        .adrc_eso_freq = 20,
+        .adrc_td_freq = 0,
+        .adrc_kt = { 60, 60, 40 },
+        .adrc_alpha_hat = { 40, 40, 30 },
+        .adrc_hover_throttle = 28,
     );
 }
 
@@ -1171,6 +1178,25 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
     DEBUG_SET(DEBUG_CHIRP, 3, lrintf(1.0e3f * chirp));
 
 #endif // USE_CHIRP
+
+    // ----------ADRC branch: bypass PID loop entirely----------
+    if (pidProfile->controller_type == CONTROLLER_ADRC) {
+        adrcController(pidProfile, currentTimeUs);
+        if (!pidRuntime.pidStabilisationEnabled || gyroOverflowDetected()) {
+            for (int axis = FD_ROLL; axis <= FD_YAW; ++axis) {
+                pidData[axis].P = 0;
+                pidData[axis].I = 0;
+                pidData[axis].D = 0;
+                pidData[axis].F = 0;
+                pidData[axis].S = 0;
+                pidData[axis].Sum = 0;
+            }
+            adrcResetState();
+        } else if (pidRuntime.zeroThrottleItermReset) {
+            adrcResetState();
+        }
+        return;
+    }
 
     // ----------PID controller----------
     for (flight_dynamics_index_t axis = FD_ROLL; axis <= FD_YAW; ++axis) {
