@@ -44,6 +44,8 @@ ENV LANG=en_US.UTF-8 \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     python3-intelhex \
+    python3-numpy \
+    python3-matplotlib \
     dfu-util \
     libblocksruntime-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -71,6 +73,16 @@ RUN git clone git://git.code.sf.net/p/stm32flash/code stm32flash-code && \
     make install && \
     cd .. && \
     rm -rf stm32flash-code
+
+# Install Node.js (Debian 13/Trixie ships Node 22, satisfies Claude Code's >=18 requirement)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code CLI globally
+RUN npm install -g @anthropic-ai/claude-code
 
 # Create a non-root user for DevPod/VSCodium
 ARG USERNAME=devpod
