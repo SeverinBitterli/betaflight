@@ -39,12 +39,17 @@ typedef struct adrcRuntime_s {
     float l1;                           // ESO base integral gain: 4*pi^2*f_ESO^2 (shared, divided by alpha per cycle)
     float td_gain;                      // TD pole: 2*pi*f_TD, 0 = disabled (shared)
     float hover_throttle;               // normalised hover throttle [0,1] — alpha reference point
+    float sigma_decay;                  // leaky integrator rate (1/s); bleeds sigma_hat to 0 when undisturbed
     float itermLimit;
     float itermLimitYaw;
 
-    // Per-axis hover values (adrc_alpha_hat / adrc_kt from profile)
+    // Per-axis coefficients
     float alpha_hat[XYZ_AXIS_COUNT];
     float kt[XYZ_AXIS_COUNT];
+    float kd[XYZ_AXIS_COUNT];   // rate-damping gain (DTERM_SCALE * adrc_kd), opposes gyroRate directly
+
+    // Setpoint array — written by pidController() each cycle with level-mode adjustments applied
+    float setpoint[XYZ_AXIS_COUNT];
 
     adrcAxisState_t axis[XYZ_AXIS_COUNT];
 } adrcRuntime_t;

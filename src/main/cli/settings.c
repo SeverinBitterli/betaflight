@@ -1388,9 +1388,13 @@ const clivalue_t valueTable[] = {
     { "adrc_kt_roll",           VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, PID_GAIN_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_kt[FD_ROLL]) },
     { "adrc_kt_pitch",          VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, PID_GAIN_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_kt[FD_PITCH]) },
     { "adrc_kt_yaw",            VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, PID_GAIN_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_kt[FD_YAW]) },
+    { "adrc_kd_roll",           VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, PID_GAIN_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_kd[FD_ROLL]) },
+    { "adrc_kd_pitch",          VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, PID_GAIN_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_kd[FD_PITCH]) },
+    { "adrc_kd_yaw",            VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, PID_GAIN_MAX }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_kd[FD_YAW]) },
     { "adrc_alpha_hat_roll",    VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 1, 250 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_alpha_hat[FD_ROLL]) },
     { "adrc_alpha_hat_pitch",   VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 1, 250 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_alpha_hat[FD_PITCH]) },
     { "adrc_alpha_hat_yaw",     VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 1, 250 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_alpha_hat[FD_YAW]) },
+    { "adrc_sigma_decay",       VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 100 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_sigma_decay) },
     { "adrc_hover_throttle",    VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 5, 95  }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_hover_throttle) },
 
 #ifdef USE_WING

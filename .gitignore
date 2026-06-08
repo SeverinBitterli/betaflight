@@ -67,6 +67,7 @@ betaflight_backup_*.txt
 /adrc_simulation.png
 /adrc_comparison.png
 /adrc_param_calc.png
+/bbl_analysis.png
 # Jupyter notebook checkpoints
 .ipynb_checkpoints/
 

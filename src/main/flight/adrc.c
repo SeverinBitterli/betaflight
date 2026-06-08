@@ -76,6 +76,8 @@ void adrcInitProfile(const pidProfile_t *pidProfile)
     for (int axis = FD_ROLL; axis <= FD_YAW; axis++) {
         adrcRuntime.alpha_hat[axis] = (float)pidProfile->adrc_alpha_hat[axis];
         adrcRuntime.kt[axis]        = (float)pidProfile->adrc_kt[axis];
+        // kd uses the same DTERM_SCALE as PID so adrc_kd feels identical to PID D
+        adrcRuntime.kd[axis]        = DTERM_SCALE * (float)pidProfile->adrc_kd[axis];
     }
 
     if (pidProfile->adrc_td_freq > 0) {
@@ -84,6 +86,7 @@ void adrcInitProfile(const pidProfile_t *pidProfile)
         adrcRuntime.td_gain = 0.0f;
     }
 
+    adrcRuntime.sigma_decay   = (float)pidProfile->adrc_sigma_decay * 0.1f;
     adrcRuntime.itermLimit    = 0.01f * pidProfile->itermWindup * pidProfile->pidSumLimit;
     adrcRuntime.itermLimitYaw = 0.01f * pidProfile->itermWindup * pidProfile->pidSumLimitYaw;
 }
@@ -110,8 +113,10 @@ void FAST_CODE adrcController(const pidProfile_t *pidProfile, timeUs_t currentTi
     // rcCommand[THROTTLE] is in [1000, 2000]; normalise to [0, 1]
     const float thr = constrainf(((float)rcCommand[THROTTLE] - 1000.0f) * 0.001f, 0.0f, 1.0f);
     const float thr_ratio = thr / adrcRuntime.hover_throttle;
-    // alpha_scale = (thr/hover_thr)², clamped so alpha never drops below 4% of hover value
-    const float alpha_scale = constrainf(thr_ratio * thr_ratio, 0.04f, 9.0f);
+    // Only scale alpha UP above hover throttle — below hover, use hover alpha.
+    // Scaling DOWN to 0.04 at zero throttle made inv_alpha 25× too large,
+    // causing extreme output for small errors and motor overheating.
+    const float alpha_scale = constrainf(thr_ratio * thr_ratio, 1.0f, 9.0f);
 
     for (int axis = FD_ROLL; axis <= FD_YAW; axis++) {
         adrcAxisState_t *st = &adrcRuntime.axis[axis];
@@ -123,7 +128,8 @@ void FAST_CODE adrcController(const pidProfile_t *pidProfile, timeUs_t currentTi
         const float kt           = adrcRuntime.kt[axis];
 
         const float gyroRate = gyro.gyroADCf[axis];
-        const float v_sp     = getSetpointRate(axis);
+        // Use pre-computed setpoint (angle/horizon-mode adjusted by pidController before calling us)
+        const float v_sp     = adrcRuntime.setpoint[axis];
 
         // 1. Tracking Differentiator (Eq. 17)
         float v_ref_dot;
@@ -138,14 +144,16 @@ void FAST_CODE adrcController(const pidProfile_t *pidProfile, timeUs_t currentTi
         // 2. ESO update (Eq. 19) with throttle-scaled alpha
         const float v_err = gyroRate - st->v_hat;
         st->v_hat     += dT * (alpha_eff * (st->u_act_hat + st->sigma_hat) + adrcRuntime.l0 * v_err);
-        st->sigma_hat += dT * l1_over_alpha * v_err;
+        // Leaky integrator: decay toward 0 so transient windup drains away
+        st->sigma_hat += dT * (l1_over_alpha * v_err - adrcRuntime.sigma_decay * st->sigma_hat);
 
         const float sigma_limit = (axis == FD_YAW) ? adrcRuntime.itermLimitYaw : adrcRuntime.itermLimit;
         st->sigma_hat = constrainf(st->sigma_hat, -sigma_limit, sigma_limit);
 
-        // 3. Control law (Eq. 15) with throttle-scaled 1/alpha
-        const float tracking = kt * (st->v_ref - gyroRate);
-        float output = inv_alpha * (v_ref_dot + tracking) - st->sigma_hat;
+        // 3. Control law (Eq. 15) with throttle-scaled 1/alpha + rate damping
+        const float tracking  = kt * (st->v_ref - gyroRate);
+        const float damping   = adrcRuntime.kd[axis] * gyroRate;   // opposes rate directly
+        float output = inv_alpha * (v_ref_dot + tracking) - st->sigma_hat - damping;
 
         const float pid_limit = (float)((axis == FD_YAW) ? pidProfile->pidSumLimitYaw : pidProfile->pidSumLimit);
         output = constrainf(output, -pid_limit, pid_limit);
@@ -154,7 +162,7 @@ void FAST_CODE adrcController(const pidProfile_t *pidProfile, timeUs_t currentTi
 
         pidData[axis].P   = inv_alpha * tracking;
         pidData[axis].I   = -st->sigma_hat;
-        pidData[axis].D   = 0.0f;
+        pidData[axis].D   = -damping;   // visible in Blackbox — confirms kd is active
         pidData[axis].F   = inv_alpha * v_ref_dot;
         pidData[axis].S   = 0.0f;
         pidData[axis].Sum = output;

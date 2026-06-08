@@ -9,7 +9,7 @@ Betaflight is flight controller software (firmware) used to fly multi-rotor craf
 
 ## ADRC Rate Controller (`ADRC-Implementation` branch)
 
-This branch adds an **Active Disturbance Rejection Control (ADRC)** rate controller as a drop-in alternative to the standard PID controller. ADRC replaces the I-term with an Extended State Observer (ESO) that estimates and cancels lumped disturbances (wind, gyro bias, model error) in real time, giving faster disturbance rejection without the windup behaviour of a traditional integrator.
+This branch adds an **Active Disturbance Rejection Control (ADRC)** rate controller as a drop-in alternative to the standard PID controller. ADRC replaces the I-term with an Extended State Observer (ESO) that estimates and cancels lumped disturbances (wind, gyro bias, model error) in real time, giving faster disturbance rejection without the windup behaviour of a traditional integrator. Angle mode and horizon mode are fully supported.
 
 Based on: *Chebbi & Brière, "Robust active disturbance rejection control for systems with internal uncertainties: Multirotor UAV application", Journal of Field Robotics 39(4), 426-456, 2022.*
 
@@ -22,51 +22,81 @@ set controller_type = ADRC
 save
 ```
 
-Switch back to PID at any time with `set controller_type = PID`.
+Switch back to PID at any time with `set controller_type = PID`. All other parameters keep their values when switching modes.
 
 ### Parameters
 
 | CLI parameter | Default | Description |
 |---|---|---|
 | `controller_type` | `PID` | `PID` or `ADRC` |
-| `adrc_eso_freq` | `20` | ESO bandwidth in Hz — controls how fast disturbances are estimated |
+| `adrc_eso_freq` | `20` | ESO bandwidth in Hz — how fast disturbances are estimated |
 | `adrc_td_freq` | `0` | Tracking Differentiator bandwidth in Hz (0 = disabled) |
-| `adrc_kt_roll/pitch/yaw` | `60/60/40` | Per-axis tracking gain (1/s) — equivalent feel to PID P gain |
+| `adrc_kt_roll/pitch/yaw` | `60/60/40` | Per-axis tracking gain (1/s) — equivalent feel to PID P |
+| `adrc_kd_roll/pitch/yaw` | `20/25/0` | Per-axis rate-damping gain — equivalent feel to PID D, same scale |
 | `adrc_alpha_hat_roll/pitch/yaw` | `40/40/30` | Per-axis estimated system gain at hover (deg/s² per mixer unit) |
-| `adrc_hover_throttle` | `28` | Throttle % at which the drone hovers — used to scale alpha with throttle² |
+| `adrc_hover_throttle` | `45` | Throttle % at hover — alpha scales as `(thr/hover_thr)²` above this point |
+| `adrc_sigma_decay` | `3` | Disturbance estimate leak rate × 10 (1/s). Prevents sigma_hat windup on the ground and during dives. `3` = 0.3/s ≈ 3-second drain. |
 
 ### Tuning Guide
 
-1. **Find hover throttle** — arm the drone, increase throttle until it just lifts off and holds altitude steadily. Note the stick percentage and set `adrc_hover_throttle` to that value.
+**Starting point from an existing PID tune:**
 
-2. **Set `adrc_alpha_hat`** — derived from your existing PID P gain: `alpha_hat = adrc_kt / Kp` where `Kp = 0.032029 × P_value`. For P=45: `alpha_hat = 60 / (0.032029×45) ≈ 42`.
+1. **`adrc_alpha_hat`** — `alpha_hat = adrc_kt / Kp` where `Kp = PTERM_SCALE × P_value = 0.032029 × P`.
+   For P=45: `alpha_hat = 60 / (0.032029 × 45) ≈ 42`.
 
-3. **Tune `adrc_kt`** — increase for sharper tracking (like raising P), decrease for softer feel.
+2. **`adrc_hover_throttle`** — hover the drone in PID mode, note the throttle stick percentage, and enter that value.
 
-4. **Tune `adrc_eso_freq`** — increase for faster disturbance rejection, decrease if oscillations appear.
+3. **`adrc_kd`** — start equal to your PID D values (`d_roll`, `d_pitch`). Raise to reduce propwash and roll/flip oscillations; lower if motors oscillate.
+
+4. **`adrc_kt`** — raise for sharper tracking (like raising P), lower for softer feel.
+
+5. **`adrc_eso_freq`** — raise for faster disturbance rejection; if sigma_hat saturates or motors get warm, lower it. Start at 3–10 Hz.
+
+6. **`adrc_sigma_decay`** — raise (e.g. to 20–30) if motors stay hot or don't spin down when throttle is lowered.
+
+**Blackbox verification:**
+
+- `axisD[0]` flat at 0 → ADRC is NOT running (still on PID)
+- `axisD[0]` non-zero → ADRC kd is active ✓
+- `axisI[0]` near ±sigma_limit constantly → increase `adrc_sigma_decay` or decrease `adrc_eso_freq`
 
 ### Architecture
 
 ```
-getSetpointRate() ──► Tracking Differentiator ──► v_ref, v_ref_dot
-                                                        │
-gyro.gyroADCf[]  ──► Extended State Observer  ──► sigma_hat (disturbance estimate)
-                              │                         │
-                              └──────────────► Control Law (Eq.15) ──► pidData[].Sum ──► Mixer
+pidLevel() / getSetpointRate()
+         │  (angle/horizon/acro mode)
+         ▼
+Tracking Differentiator ──► v_ref, v_ref_dot
+         │
+         ▼                                    [Blackbox]
+Control Law (Eq.15):  output = (1/α̂)(v_ref_dot + kt·error) − σ̂ − kd·gyro
+         │                                    P slot: tracking term
+         │                                    I slot: −sigma_hat
+gyro ──► Extended State Observer ──► σ̂       D slot: −kd·gyro
+         (throttle-scaled α̂)                 F slot: feedforward (TD)
+         │
+         ▼
+    pidData[].Sum ──► Mixer
 ```
 
-The ESO uses a throttle-dependent plant model (`alpha ∝ throttle²`) to avoid instability at low throttle during takeoff.
+The ESO uses a throttle-dependent plant model (`alpha ∝ throttle²` above hover, constant below hover) so the controller gain stays correctly calibrated across the full throttle range.
 
 ### Simulation
 
-A closed-loop Python simulation is included for validating parameters before flying:
+A closed-loop Python simulation validates parameters before flying:
 
 ```bash
 cd /workspaces/Betaflight
 python3 tools/adrc_simulation.py
 ```
 
-Edit the `P` dict at the top of the script to match your CLI settings.
+Edit the `P` dict at the top of the script to match your CLI settings. The simulation runs 8 test scenarios including step response, disturbance rejection, model mismatch robustness, and a runaway check.
+
+A Blackbox log analyser is also included:
+
+```bash
+python3 tools/bbl_analyze.py path/to/log.BBL
+```
 
 ---
 

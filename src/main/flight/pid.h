@@ -339,7 +339,9 @@ typedef struct pidProfile_s {
     uint8_t adrc_td_freq;                  // TD bandwidth in Hz (0 disables TD, uses raw setpoint)
     uint8_t adrc_kt[XYZ_AXIS_COUNT];         // Per-axis tracking gain in 1/s [roll, pitch, yaw]
     uint8_t adrc_alpha_hat[XYZ_AXIS_COUNT];  // Per-axis system gain at hover (deg/s^2 per mixer unit) [roll, pitch, yaw]
+    uint8_t adrc_kd[XYZ_AXIS_COUNT];         // Per-axis rate-damping gain, same scale as PID D [roll, pitch, yaw]
     uint8_t adrc_hover_throttle;             // Throttle % at hover (0-100); alpha scales as (thr/hover_thr)^2
+    uint8_t adrc_sigma_decay;               // sigma_hat leak rate x10 (1/s); prevents windup; 0=off, 3=0.3/s (~3s decay)
 } pidProfile_t;
 
 PG_DECLARE_ARRAY(pidProfile_t, PID_PROFILE_COUNT, pidProfiles);

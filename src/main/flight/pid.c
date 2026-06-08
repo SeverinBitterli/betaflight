@@ -120,7 +120,7 @@ PG_RESET_TEMPLATE(pidConfig_t, pidConfig,
 #define IS_AXIS_IN_ANGLE_MODE(i) false
 #endif // USE_ACC
 
-PG_REGISTER_ARRAY_WITH_RESET_FN(pidProfile_t, PID_PROFILE_COUNT, pidProfiles, PG_PID_PROFILE, 12);
+PG_REGISTER_ARRAY_WITH_RESET_FN(pidProfile_t, PID_PROFILE_COUNT, pidProfiles, PG_PID_PROFILE, 13);
 
 void resetPidProfile(pidProfile_t *pidProfile)
 {
@@ -263,7 +263,9 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .adrc_td_freq = 0,
         .adrc_kt = { 60, 60, 40 },
         .adrc_alpha_hat = { 40, 40, 30 },
-        .adrc_hover_throttle = 28,
+        .adrc_kd = { 20, 25, 0 },
+        .adrc_sigma_decay = 3,
+        .adrc_hover_throttle = 45,
     );
 }
 
@@ -1181,6 +1183,18 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
     // ----------ADRC branch: bypass PID loop entirely----------
     if (pidProfile->controller_type == CONTROLLER_ADRC) {
+        // Compute level-adjusted setpoints so angle/horizon mode works with ADRC.
+        // levelMode, horizonLevelStrength and angleTrim are already set above (USE_ACC block).
+        for (int axis = FD_ROLL; axis <= FD_YAW; ++axis) {
+            float sp = getSetpointRate(axis);
+#if defined(USE_ACC)
+            if ((levelMode == LEVEL_MODE_RP && (axis == FD_ROLL || axis == FD_PITCH)) ||
+                (levelMode == LEVEL_MODE_R  &&  axis == FD_ROLL)) {
+                sp = pidLevel(axis, pidProfile, angleTrim, sp, horizonLevelStrength);
+            }
+#endif
+            adrcRuntime.setpoint[axis] = sp;
+        }
         adrcController(pidProfile, currentTimeUs);
         if (!pidRuntime.pidStabilisationEnabled || gyroOverflowDetected()) {
             for (int axis = FD_ROLL; axis <= FD_YAW; ++axis) {
