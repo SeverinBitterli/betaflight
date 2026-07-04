@@ -262,7 +262,8 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .adrc_eso_freq = 20,            // observer bandwidth ~20 Hz (wo≈126 rad/s)
         .adrc_td_freq = 0,
         .adrc_ctrl_freq = { 6, 6, 5 },  // controller bandwidth per axis (Hz)
-        .adrc_b0 = { 140, 140, 160 },   // plant gain: b0 = value*20; MUST be tuned to the craft
+        .adrc_b0 = { 140, 140, 160 },   // plant gain: b0 = value*adrc_b0_scale; MUST be tuned to the craft
+        .adrc_b0_scale = 20,            // global System-Gain multiplier (matches the old fixed ADRC_B0_SCALE)
         .adrc_sigma_decay = 3,
         .adrc_sigma_decay_sched = 0,
         .adrc_hover_throttle = 45,

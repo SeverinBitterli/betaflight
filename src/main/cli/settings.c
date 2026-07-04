@@ -1391,6 +1391,7 @@ const clivalue_t valueTable[] = {
     { "adrc_b0_roll",           VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 1, 250 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_b0[FD_ROLL]) },
     { "adrc_b0_pitch",          VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 1, 250 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_b0[FD_PITCH]) },
     { "adrc_b0_yaw",            VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 1, 250 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_b0[FD_YAW]) },
+    { "adrc_b0_scale",          VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 1, 100 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_b0_scale) },
     { "adrc_sigma_decay",       VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 100 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_sigma_decay) },
     { "adrc_sigma_decay_sched", VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 0, 200 }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_sigma_decay_sched) },
     { "adrc_hover_throttle",    VAR_UINT8 | PROFILE_VALUE, .config.minmaxUnsigned = { 5, 95  }, PG_PID_PROFILE, offsetof(pidProfile_t, adrc_hover_throttle) },

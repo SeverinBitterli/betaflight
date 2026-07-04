@@ -36,7 +36,8 @@ Switch back to PID at any time with `set controller_type = PID`. All other param
 | `adrc_eso_freq` | `20` | Observer bandwidth `wo = 2π·f` in Hz — how fast the ESO estimates rate/accel/disturbance. Higher = more disturbance & lag rejection and more robustness, until gyro noise bites. |
 | `adrc_td_freq` | `0` | Optional setpoint Tracking Differentiator bandwidth in Hz (0 = disabled, raw setpoint) |
 | `adrc_ctrl_freq_roll/pitch/yaw` | `6/6/5` | Per-axis controller bandwidth `wc = 2π·f` in Hz — how sharp the response is (`kp = wc²`, `kd = 2·wc`). The rough analogue of PID P. |
-| `adrc_b0_roll/pitch/yaw` | `140/140/160` | Per-axis plant gain at hover; effective `b0 = value × 20` (rate_ddot per output unit). **The primary tuning knob** — output gain ≈ `1/b0`. **Must be tuned to your craft.** |
+| `adrc_b0_roll/pitch/yaw` | `140/140/160` | Per-axis plant gain at hover; effective `b0 = value × adrc_b0_scale` (rate_ddot per output unit). **The primary tuning knob** — output gain ≈ `1/b0`. **Must be tuned to your craft.** |
+| `adrc_b0_scale` | `20` | Global System-Gain multiplier shared by all axes, applied on top of `adrc_b0`. Set once per craft — raise it if your craft needs a gain beyond `adrc_b0`'s 1–250 range (e.g. a whoop needing a very small `b0`); day-to-day tuning stays in `adrc_b0`. `0` (old/corrupted config) falls back to the legacy fixed scale of `20`. |
 | `adrc_hover_throttle` | `45` | Throttle % at hover — `b0` scales as `(thr/hover_thr)²` above this point |
 | `adrc_sigma_decay` | `3` | Disturbance (`z3`) **base** leak rate × 10 (1/s). Prevents windup on the ground and during dives. `3` = 0.3/s ≈ 3-second drain. |
 | `adrc_sigma_decay_sched` | `0` | Scales the `adrc_sigma_decay` leak *down* while the ESO error stays persistently large × 0.01 (1/(deg/s)), so a genuinely sustained disturbance (bent frame, steady wind, held arm) is held rather than leaked away. `0` = disabled (constant decay, legacy behaviour). Raise in small steps and watch Blackbox `axisI` for slow oscillation. |
@@ -47,7 +48,7 @@ Tune in this order. `adrc_b0` is the load-bearing knob — get it in the right b
 
 1. **`adrc_hover_throttle`** — hover the drone in PID mode, note the throttle stick percentage, enter that value.
 
-2. **`adrc_b0`** — the plant gain, and the primary knob. Output gain is roughly `1/b0`, so **too LOW → too much gain → twitchy/oscillation; too HIGH → sluggish/mushy.** Start at the default, take a gentle hover, and adjust until the craft holds attitude crisply without buzzing. Tune roll/pitch together, yaw separately. (The degree-2 observer tolerates a fair amount of `b0` error, so you don't need it exact — just the right order of magnitude.)
+2. **`adrc_b0`** — the plant gain, and the primary knob. Output gain is roughly `1/b0`, so **too LOW → too much gain → twitchy/oscillation; too HIGH → sluggish/mushy.** Start at the default, take a gentle hover, and adjust until the craft holds attitude crisply without buzzing. Tune roll/pitch together, yaw separately. (The degree-2 observer tolerates a fair amount of `b0` error, so you don't need it exact — just the right order of magnitude.) Leave `adrc_b0_scale` at its default (`20`) unless `adrc_b0` alone can't reach the gain your craft needs (its range is 1–250) — then adjust `adrc_b0_scale` once and go back to tuning day-to-day with `adrc_b0`.
 
 3. **`adrc_ctrl_freq`** — controller bandwidth, i.e. how sharp/fast the response is (the P analogue). Raise for tighter tracking, lower for a softer feel. Keep it well below `adrc_eso_freq` (roughly ⅓–½) so the observer stays faster than the controller.
 
@@ -63,6 +64,17 @@ Tune in this order. `adrc_b0` is the load-bearing knob — get it in the right b
 - `axisI[0]` = `−z3/b0` (disturbance cancellation); `axisD[0]` = `−kd·z2/b0` (damping of the estimated acceleration)
 - `axisI[0]` pinned near ±limit constantly → `b0` likely too low, or increase `adrc_sigma_decay`
 - Oscillation whose frequency *scales with* `adrc_eso_freq` → observer/plant mismatch: fix `adrc_b0` first, then adjust `eso_freq`
+
+For direct visibility into the observer itself (not just its P/I/D projection), set `debug_mode = ADRC`:
+
+| Debug slot | Value |
+|---|---|
+| 0 / 1 / 2 | roll `z1` / `z2` / `z3` |
+| 3 / 4 / 5 | pitch `z1` / `z2` / `z3` |
+| 6 | yaw `z3` |
+| 7 | current throttle-scaled `b0` multiplier (`b0_scale × 100`), sign-tagged by the liftoff latch — **positive = airborne**, **negative = still gated on the ground** |
+
+This is the most direct way to see the takeoff-bounce mechanism described above: watch pitch `z3` (slot 5) during spool-up — if it's winding up while slot 7 is still negative (pre-liftoff), that's the ESO mis-attributing ground-constrained thrust to a phantom disturbance, which the liftoff gate exists to prevent.
 
 ### Architecture
 
@@ -89,7 +101,7 @@ The ESO uses a throttle-dependent plant model (`b0 ∝ throttle²` above hover, 
 
 ### Testing
 
-The controller is covered by a unit-test suite ([`src/test/unit/adrc_unittest.cc`](src/test/unit/adrc_unittest.cc)) that verifies coefficient initialisation (β/kp/kd/b0), state reset, the zero-input/setpoint/disturbance responses, disturbance clamping, the decay schedule, the liftoff gate, and throttle scaling. Build and run it with:
+The controller is covered by a unit-test suite ([`src/test/unit/adrc_unittest.cc`](src/test/unit/adrc_unittest.cc)) that verifies coefficient initialisation (β/kp/kd/b0), state reset, the zero-input/setpoint/disturbance responses, disturbance clamping, the decay schedule, the liftoff gate, throttle scaling, the runtime-configurable `adrc_b0_scale` (including its fallback when unset), and the `debug_mode = ADRC` Blackbox logging. Build and run it with:
 
 ```bash
 cd src/test

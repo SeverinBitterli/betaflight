@@ -21,7 +21,7 @@
 /*
  * Unit tests for src/main/flight/adrc.c
  *
- * Twelve test cases, in order of complexity:
+ * Fourteen test cases, in order of complexity:
  *
  *  1. testAdrcCoefficientsInit         – adrcInitProfile() computes beta1/2/3, kp, kd, b0, td_gain
  *  2. testAdrcResetState               – adrcResetState() zeroes all per-axis state
@@ -35,6 +35,8 @@
  * 10. testAdrcLiftoffGateRearmsOnIdle  – liftoff re-latches false after a sustained return to idle throttle
  * 11. testAdrcThrottleScaling          – b0 scales with throttle², so output shrinks at higher throttle
  * 12. testAdrcAngleMode                – ANGLE_MODE → pidLevel rate setpoint → ADRC commands a leveling output
+ * 13. testAdrcB0ScaleConfigurable      – adrc_b0_scale rescales b0_hat at runtime; 0 falls back to the legacy default
+ * 14. testAdrcDebugBlackbox            – debug_mode = ADRC logs z1/z2/z3 per axis and the sign-tagged b0 scale
  */
 
 #include <stdint.h>
@@ -143,10 +145,12 @@ int loopIter = 0;
 static const float TEST_ESO_FREQ   = 10.0f;  // Hz → observer bandwidth wo
 static const float TEST_CTRL_FREQ  =  6.0f;  // Hz → controller bandwidth wc
 static const float TEST_TD_FREQ    =  5.0f;  // Hz
-static const uint8_t TEST_ADRC_B0  = 100;    // b0_hat = 100 * ADRC_B0_SCALE
+static const uint8_t TEST_ADRC_B0  = 100;    // b0_hat = 100 * adrc_b0_scale
 static const uint8_t TEST_ITERMWINDUP = 80;
 
-// Must match ADRC_B0_SCALE in adrc.c
+// adrc_b0_scale used by the fixture; also matches ADRC_B0_SCALE_DEFAULT in
+// adrc.c (the fallback used when the field reads 0), so tests double as
+// coverage for that fallback staying in sync.
 static const float TEST_B0_SCALE = 20.0f;
 
 // 3-state (degree-2) ESO: triple pole at -wo → [beta1,beta2,beta3]=[3wo,3wo^2,wo^3];
@@ -232,6 +236,7 @@ void setDefaultAdrcProfile(void)
     pidProfile->adrc_b0[FD_ROLL]  = TEST_ADRC_B0;
     pidProfile->adrc_b0[FD_PITCH] = TEST_ADRC_B0;
     pidProfile->adrc_b0[FD_YAW]   = TEST_ADRC_B0;
+    pidProfile->adrc_b0_scale     = (uint8_t)TEST_B0_SCALE;
     pidProfile->adrc_hover_throttle = 45;
 
     gyro.targetLooptime = 8000; // 8 ms loop (125 Hz) — same as pid_unittest
@@ -754,4 +759,96 @@ TEST(adrcTest, testAdrcAngleMode)
     EXPECT_NEAR(0.0f, adrcRuntime.setpoint[FD_PITCH], 5.0f);
 
     DISABLE_FLIGHT_MODE(ANGLE_MODE);
+}
+
+// ===========================================================================
+// Test 13 – adrc_b0_scale is a runtime-configurable global multiplier:
+// b0_hat = adrc_b0[axis] * adrc_b0_scale. Changing it at runtime (re-running
+// adrcInitProfile via pidInit) must rescale b0_hat on every axis accordingly.
+// A scale of 0 (old/corrupted config predating this field) must fall back to
+// the legacy fixed scale of 20 rather than propagating a zero/garbage gain.
+// ===========================================================================
+TEST(adrcTest, testAdrcB0ScaleConfigurable)
+{
+    resetAdrcTest();
+
+    // Baseline: default fixture scale (20) → b0_hat = adrc_b0 * 20
+    for (int axis = FD_ROLL; axis <= FD_YAW; axis++) {
+        EXPECT_NEAR((float)TEST_ADRC_B0 * TEST_B0_SCALE, adrcRuntime.b0_hat[axis],
+            tol((float)TEST_ADRC_B0 * TEST_B0_SCALE));
+    }
+
+    // Rescale: a craft-level constant of 5 instead of 20 must proportionally
+    // shrink b0_hat on every axis.
+    const uint8_t newScale = 5;
+    pidProfile->adrc_b0_scale = newScale;
+    pidInit(pidProfile);
+
+    for (int axis = FD_ROLL; axis <= FD_YAW; axis++) {
+        const float expected = (float)TEST_ADRC_B0 * (float)newScale;
+        EXPECT_NEAR(expected, adrcRuntime.b0_hat[axis], tol(expected));
+    }
+
+    // Fallback: adrc_b0_scale = 0 (old/corrupted config) must NOT propagate a
+    // zero gain — it falls back to the legacy fixed scale of 20.
+    pidProfile->adrc_b0_scale = 0;
+    pidInit(pidProfile);
+
+    for (int axis = FD_ROLL; axis <= FD_YAW; axis++) {
+        const float expected = (float)TEST_ADRC_B0 * TEST_B0_SCALE; // TEST_B0_SCALE == legacy default (20)
+        EXPECT_NEAR(expected, adrcRuntime.b0_hat[axis], tol(expected));
+    }
+}
+
+// ===========================================================================
+// Test 14 – debug_mode = ADRC logs the observer's internal states to
+// Blackbox: roll z1/z2/z3 in slots [0..2], pitch z1/z2/z3 in [3..5], yaw z3
+// in [6], and the current throttle-scaled b0 multiplier (x100) sign-tagged
+// by the liftoff latch in [7] (positive = airborne, negative = gated).
+// ===========================================================================
+TEST(adrcTest, testAdrcDebugBlackbox)
+{
+    resetAdrcTest();
+    pidProfile->adrc_td_freq = 0;
+    pidInit(pidProfile);
+    adrcResetState();
+
+    pidStabilisationState(PID_STABILISATION_ON);
+    ENABLE_ARMING_FLAG(ARMED);
+    debugMode = DEBUG_ADRC;
+
+    // Below the liftoff throttle threshold, with a sustained disturbance on
+    // roll and pitch so z1/z2/z3 move away from zero and are distinguishable
+    // per axis, plus a small yaw error.
+    rcCommand[THROTTLE] = 1000.0f; // 0 % — liftoff stays false
+    gyro.gyroADCf[FD_ROLL]  = 10.0f;
+    gyro.gyroADCf[FD_PITCH] = -5.0f;
+    gyro.gyroADCf[FD_YAW]   = 3.0f;
+
+    for (int cycle = 0; cycle < 10; cycle++) {
+        adrcController(pidProfile, currentTestTime());
+    }
+
+    EXPECT_FALSE(adrcRuntime.liftoff);
+
+    EXPECT_EQ(lrintf(adrcRuntime.axis[FD_ROLL].z1),  debug[0]);
+    EXPECT_EQ(lrintf(adrcRuntime.axis[FD_ROLL].z2),  debug[1]);
+    EXPECT_EQ(lrintf(adrcRuntime.axis[FD_ROLL].z3),  debug[2]);
+    EXPECT_EQ(lrintf(adrcRuntime.axis[FD_PITCH].z1), debug[3]);
+    EXPECT_EQ(lrintf(adrcRuntime.axis[FD_PITCH].z2), debug[4]);
+    EXPECT_EQ(lrintf(adrcRuntime.axis[FD_PITCH].z3), debug[5]);
+    EXPECT_EQ(lrintf(adrcRuntime.axis[FD_YAW].z3),   debug[6]);
+
+    // Pre-liftoff → slot [7] must be negative (gated).
+    EXPECT_LT(debug[7], 0);
+
+    // Cross the liftoff throttle threshold — slot [7] must flip positive
+    // (airborne) on the very next cycle, per the liftoff gate semantics
+    // already covered by testAdrcLiftoffGate.
+    rcCommand[THROTTLE] = 1500.0f; // 50 %, above ADRC_LIFTOFF_THROTTLE (40 %)
+    adrcController(pidProfile, currentTestTime());
+    EXPECT_TRUE(adrcRuntime.liftoff);
+    EXPECT_GT(debug[7], 0);
+
+    debugMode = DEBUG_NONE;
 }

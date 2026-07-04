@@ -338,7 +338,8 @@ typedef struct pidProfile_s {
     uint8_t adrc_eso_freq;                 // Observer bandwidth wo=2*pi*f in Hz (beta=[3wo,3wo^2,wo^3])
     uint8_t adrc_td_freq;                  // Optional setpoint TD bandwidth in Hz (0 disables, uses raw setpoint)
     uint8_t adrc_ctrl_freq[XYZ_AXIS_COUNT];  // Per-axis controller bandwidth wc=2*pi*f in Hz (kp=wc^2, kd=2wc) [roll, pitch, yaw]
-    uint8_t adrc_b0[XYZ_AXIS_COUNT];         // Per-axis plant gain at hover; b0 = value * ADRC_B0_SCALE (rate_ddot per output unit) [roll, pitch, yaw]
+    uint8_t adrc_b0[XYZ_AXIS_COUNT];         // Per-axis plant gain at hover; b0 = value * adrc_b0_scale (rate_ddot per output unit) [roll, pitch, yaw]
+    uint8_t adrc_b0_scale;                   // Global System-Gain multiplier shared by all axes: b0 = adrc_b0[axis] * adrc_b0_scale. Set once per craft; raise on high thrust/weight builds where adrc_b0 alone can't reach the needed gain (0 falls back to the legacy fixed scale of 20)
     uint8_t adrc_hover_throttle;             // Throttle % at hover (0-100); b0 scales as (thr/hover_thr)^2
     uint8_t adrc_sigma_decay;               // z3 disturbance leak BASE rate x10 (1/s); prevents windup; 0=off, 3=0.3/s (~3s decay)
     uint8_t adrc_sigma_decay_sched;          // scales adrc_sigma_decay down while the ESO error stays persistently large x0.01 (1/(deg/s)); 0=off (legacy constant decay)

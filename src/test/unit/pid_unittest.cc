@@ -81,6 +81,7 @@ extern "C" {
     acc_t acc;
     gyro_t gyro;
     attitudeEulerAngles_t attitude;
+    float rcCommand[4];
 
     rxRuntimeState_t rxRuntimeState = {};
 

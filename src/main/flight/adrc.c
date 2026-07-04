@@ -95,10 +95,20 @@
  * TUNING (dedicated adrc_* params — see README):
  *   1. adrc_b0        — plant gain, the primary knob. Output gain ~ 1/b0, so
  *                       too LOW b0 -> too much gain -> twitchy/oscillation;
- *                       too HIGH -> sluggish. Tune this first.
+ *                       too HIGH -> sluggish. Tune this first. adrc_b0_scale
+ *                       is a global multiplier on top of the per-axis value
+ *                       (b0 = adrc_b0[axis] * adrc_b0_scale) — a craft-level
+ *                       constant for reaching gains outside adrc_b0's 1-250
+ *                       range (e.g. whoops needing very small b0), day-to-day
+ *                       tuning stays in adrc_b0.
  *   2. adrc_ctrl_freq — controller bandwidth (how sharp the response is), per axis.
  *   3. adrc_eso_freq  — observer bandwidth. Higher = more disturbance/lag
  *                       rejection and robustness, until gyro noise bites.
+ *
+ * DIAGNOSTICS: set debug_mode = ADRC to log the observer states to Blackbox —
+ * roll z1/z2/z3 (debug 0-2), pitch z1/z2/z3 (3-5), yaw z3 (6), and the current
+ * throttle-scaled b0 multiplier sign-tagged by the liftoff latch (7; positive
+ * = airborne, negative = still gated on the ground).
  */
 
 #include <math.h>
@@ -115,14 +125,19 @@
 
 #include "sensors/gyro.h"
 
+#include "build/debug.h"
+
 #include "flight/pid.h"
 #include "flight/adrc.h"
 
 FAST_DATA_ZERO_INIT adrcRuntime_t adrcRuntime;
 
-// Plant-gain scale: b0_hat = adrc_b0 * ADRC_B0_SCALE. adrc_b0 is uint8, this
+// Plant-gain scale: b0_hat = adrc_b0 * adrc_b0_scale. adrc_b0 is uint8, this
 // scale maps the tunable range onto realistic rate_ddot-per-output-unit gains.
-#define ADRC_B0_SCALE 20.0f
+// adrc_b0_scale is a runtime CLI value (see pid.h); this is only the fallback
+// used when it reads as 0 (corrupted/pre-upgrade config), matching the fixed
+// scale this fork used before the parameter was exposed.
+#define ADRC_B0_SCALE_DEFAULT 20.0f
 
 // Corner frequency of the err_lp low-pass used for sigma_decay scheduling.
 // Deliberately slow: fast enough to react within a few hundred ms to a
@@ -160,8 +175,15 @@ void adrcInitProfile(const pidProfile_t *pidProfile)
     const float hover_pct = (float)MAX(pidProfile->adrc_hover_throttle, 5);
     adrcRuntime.hover_throttle = hover_pct * 0.01f;
 
+    // Global System-Gain multiplier shared by all axes (adrc_b0_scale = 0 means
+    // an old/corrupted config predating this field — fall back to the legacy
+    // fixed scale rather than dividing by zero downstream).
+    const float b0Scale = (pidProfile->adrc_b0_scale > 0)
+        ? (float)pidProfile->adrc_b0_scale
+        : ADRC_B0_SCALE_DEFAULT;
+
     for (int axis = FD_ROLL; axis <= FD_YAW; axis++) {
-        adrcRuntime.b0_hat[axis] = (float)pidProfile->adrc_b0[axis] * ADRC_B0_SCALE;
+        adrcRuntime.b0_hat[axis] = (float)pidProfile->adrc_b0[axis] * b0Scale;
         // Controller poles at -wc (double): kp = wc^2, kd = 2*wc.
         const float wc = 2.0f * M_PIf * (float)pidProfile->adrc_ctrl_freq[axis];
         adrcRuntime.kp[axis] = wc * wc;
@@ -251,6 +273,12 @@ void FAST_CODE adrcController(const pidProfile_t *pidProfile, timeUs_t currentTi
         }
     }
 
+    // Blackbox visibility into the observer (debug_mode = ADRC), slot [7]: the
+    // current throttle-scaled b0 multiplier (b0_scale, x100), sign-tagged by
+    // the liftoff latch — positive = airborne (b0*u fed to the ESO), negative
+    // = still gated on the ground. Per-axis z-states are logged below.
+    DEBUG_SET(DEBUG_ADRC, 7, lrintf(adrcRuntime.liftoff ? (b0_scale * 100.0f) : -(b0_scale * 100.0f)));
+
     for (int axis = FD_ROLL; axis <= FD_YAW; axis++) {
         adrcAxisState_t *st = &adrcRuntime.axis[axis];
 
@@ -295,6 +323,23 @@ void FAST_CODE adrcController(const pidProfile_t *pidProfile, timeUs_t currentTi
         const float itermLimit = (axis == FD_YAW) ? adrcRuntime.itermLimitYaw : adrcRuntime.itermLimit;
         const float z3Limit    = b0_eff * itermLimit;
         st->z3 = constrainf(st->z3, -z3Limit, z3Limit);
+
+        // Blackbox visibility into the observer (debug_mode = ADRC): roll
+        // z1/z2/z3 in [0..2], pitch z1/z2/z3 in [3..5], yaw z3 in [6].
+        // z1 = estimated rate (deg/s), z2 = estimated accel, z3 = estimated
+        // disturbance. Slot [7] (b0_scale, sign-tagged by liftoff) is set once
+        // above the axis loop.
+        if (axis == FD_ROLL) {
+            DEBUG_SET(DEBUG_ADRC, 0, lrintf(st->z1));
+            DEBUG_SET(DEBUG_ADRC, 1, lrintf(st->z2));
+            DEBUG_SET(DEBUG_ADRC, 2, lrintf(st->z3));
+        } else if (axis == FD_PITCH) {
+            DEBUG_SET(DEBUG_ADRC, 3, lrintf(st->z1));
+            DEBUG_SET(DEBUG_ADRC, 4, lrintf(st->z2));
+            DEBUG_SET(DEBUG_ADRC, 5, lrintf(st->z3));
+        } else { // FD_YAW
+            DEBUG_SET(DEBUG_ADRC, 6, lrintf(st->z3));
+        }
 
         // 3. Control law: u = (kp*(v_ref - z1) - kd*z2 - z3) / b0_eff
         const float pTerm = kp * (st->v_ref - st->z1);
