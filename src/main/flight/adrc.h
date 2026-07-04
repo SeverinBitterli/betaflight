@@ -24,29 +24,43 @@
 #include "common/time.h"
 #include "flight/pid.h"
 
-// Per-axis runtime state (ESO + TD)
+// Per-axis runtime state (3-state ESO + TD)
 typedef struct adrcAxisState_s {
-    float v_hat;        // ESO velocity estimate (deg/s)
-    float sigma_hat;    // ESO disturbance estimate (mixer units)
-    float u_act_hat;    // previous control output (mixer units)
+    float z1;           // ESO rate estimate (deg/s)
+    float z2;           // ESO angular-acceleration estimate (deg/s^2)
+    float z3;           // ESO lumped-disturbance estimate (deg/s^3, i.e. rate_ddot units)
+    float u_act_hat;    // previous control output (mixer units) — fed into the ESO's b0*u term
     float v_ref;        // TD-filtered setpoint (deg/s)
+    float err_lp;       // low-pass filtered ESO error (deg/s) — feeds sigma_decay scheduling
 } adrcAxisState_t;
 
 // Computed coefficients — shared and per-axis
 typedef struct adrcRuntime_s {
     float dT;
-    float l0;                           // ESO correction gain: 4*pi*f_ESO (shared)
-    float l1;                           // ESO base integral gain: 4*pi^2*f_ESO^2 (shared, divided by alpha per cycle)
+    // 3-state (degree-2) ESO gains; triple pole at -wo, wo = 2*pi*f_ESO (shared)
+    float beta1;                        // 3*wo
+    float beta2;                        // 3*wo^2
+    float beta3;                        // wo^3
     float td_gain;                      // TD pole: 2*pi*f_TD, 0 = disabled (shared)
-    float hover_throttle;               // normalised hover throttle [0,1] — alpha reference point
-    float sigma_decay;                  // leaky integrator rate (1/s); bleeds sigma_hat to 0 when undisturbed
+    float hover_throttle;               // normalised hover throttle [0,1] — b0 reference point
+    float sigma_decay;                  // leaky-integrator BASE rate (1/s) on z3; bleeds it to 0 once settled
+    float decaySchedGain;               // 1/(deg/s); scales the decay down while err_lp stays persistently large. 0 = legacy constant decay
+    float decayFiltAlpha;               // per-cycle low-pass coefficient (fixed corner freq) used to compute err_lp
     float itermLimit;
     float itermLimitYaw;
 
+    // Liftoff gate: while grounded the airframe can't rotate the way the model
+    // assumes, so the ESO's "control actually applied" (b0*u) term is withheld
+    // until liftoff is detected (see adrcController). Re-arms after a sustained
+    // return to idle throttle, independent of adrcResetState().
+    bool liftoff;
+    float gyroActiveS;                  // seconds the gyro has been continuously above the liftoff threshold
+    float idleS;                        // seconds throttle has been continuously at/below idle — re-arms the gate
+
     // Per-axis coefficients
-    float alpha_hat[XYZ_AXIS_COUNT];
-    float kt[XYZ_AXIS_COUNT];
-    float kd[XYZ_AXIS_COUNT];   // rate-damping gain (DTERM_SCALE * adrc_kd), opposes gyroRate directly
+    float b0_hat[XYZ_AXIS_COUNT];       // plant gain at hover: rate_ddot per output unit (throttle-scaled per cycle)
+    float kp[XYZ_AXIS_COUNT];           // controller stiffness: wc^2, wc = 2*pi*f_ctrl
+    float kd[XYZ_AXIS_COUNT];           // controller damping: 2*wc
 
     // Setpoint array — written by pidController() each cycle with level-mode adjustments applied
     float setpoint[XYZ_AXIS_COUNT];

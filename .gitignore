@@ -68,6 +68,9 @@ betaflight_backup_*.txt
 /adrc_comparison.png
 /adrc_param_calc.png
 /bbl_analysis.png
+# ADRC flight-test blackbox exports and personal CLI restore configs
+BTFL_BLACKBOX_LOG_*.csv
+/pavo20_adrc_restore.txt
 # Jupyter notebook checkpoints
 .ipynb_checkpoints/
 

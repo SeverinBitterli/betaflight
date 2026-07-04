@@ -11,6 +11,10 @@ Betaflight is flight controller software (firmware) used to fly multi-rotor craf
 
 This branch adds an **Active Disturbance Rejection Control (ADRC)** rate controller as a drop-in alternative to the standard PID controller. ADRC replaces the I-term with an Extended State Observer (ESO) that estimates and cancels lumped disturbances (wind, gyro bias, model error) in real time, giving faster disturbance rejection without the windup behaviour of a traditional integrator. Angle mode and horizon mode are fully supported.
 
+The observer is a **degree-2, 3-state ESO** (Gao LADRC): it estimates the rate (`z1`), the angular acceleration (`z2`), and the lumped disturbance (`z3`). The rate loop is modelled as relative-degree-2 from the commanded output — a real quad is (motor/ESC/prop lag) → torque → angular acceleration → rate, i.e. a lag in series with an integrator, which *is* a 2nd-order plant. Modelling it at degree 2 lets the observer represent the actuator/prop lag as plant dynamics (state `z2`) instead of misattributing it to a phantom disturbance, which is what made a simpler relative-degree-1 observer resonate into a limit cycle on sharp setpoint inputs.
+
+The control law is standard LADRC state feedback: `u = (kp·(setpoint − z1) − kd·z2 − z3) / b0`, with the closed loop placed at a double pole `−wc` (`kp = wc²`, `kd = 2·wc`) and the disturbance `z3` cancelled directly.
+
 Based on: *Chebbi & Brière, "Robust active disturbance rejection control for systems with internal uncertainties: Multirotor UAV application", Journal of Field Robotics 39(4), 426-456, 2022.*
 
 ### Enabling ADRC
@@ -29,36 +33,36 @@ Switch back to PID at any time with `set controller_type = PID`. All other param
 | CLI parameter | Default | Description |
 |---|---|---|
 | `controller_type` | `PID` | `PID` or `ADRC` |
-| `adrc_eso_freq` | `20` | ESO bandwidth in Hz — how fast disturbances are estimated |
-| `adrc_td_freq` | `0` | Tracking Differentiator bandwidth in Hz (0 = disabled) |
-| `adrc_kt_roll/pitch/yaw` | `60/60/40` | Per-axis tracking gain (1/s) — equivalent feel to PID P |
-| `adrc_kd_roll/pitch/yaw` | `20/25/0` | Per-axis rate-damping gain — equivalent feel to PID D, same scale |
-| `adrc_alpha_hat_roll/pitch/yaw` | `40/40/30` | Per-axis estimated system gain at hover (deg/s² per mixer unit) |
-| `adrc_hover_throttle` | `45` | Throttle % at hover — alpha scales as `(thr/hover_thr)²` above this point |
-| `adrc_sigma_decay` | `3` | Disturbance estimate leak rate × 10 (1/s). Prevents sigma_hat windup on the ground and during dives. `3` = 0.3/s ≈ 3-second drain. |
+| `adrc_eso_freq` | `20` | Observer bandwidth `wo = 2π·f` in Hz — how fast the ESO estimates rate/accel/disturbance. Higher = more disturbance & lag rejection and more robustness, until gyro noise bites. |
+| `adrc_td_freq` | `0` | Optional setpoint Tracking Differentiator bandwidth in Hz (0 = disabled, raw setpoint) |
+| `adrc_ctrl_freq_roll/pitch/yaw` | `6/6/5` | Per-axis controller bandwidth `wc = 2π·f` in Hz — how sharp the response is (`kp = wc²`, `kd = 2·wc`). The rough analogue of PID P. |
+| `adrc_b0_roll/pitch/yaw` | `140/140/160` | Per-axis plant gain at hover; effective `b0 = value × 20` (rate_ddot per output unit). **The primary tuning knob** — output gain ≈ `1/b0`. **Must be tuned to your craft.** |
+| `adrc_hover_throttle` | `45` | Throttle % at hover — `b0` scales as `(thr/hover_thr)²` above this point |
+| `adrc_sigma_decay` | `3` | Disturbance (`z3`) **base** leak rate × 10 (1/s). Prevents windup on the ground and during dives. `3` = 0.3/s ≈ 3-second drain. |
+| `adrc_sigma_decay_sched` | `0` | Scales the `adrc_sigma_decay` leak *down* while the ESO error stays persistently large × 0.01 (1/(deg/s)), so a genuinely sustained disturbance (bent frame, steady wind, held arm) is held rather than leaked away. `0` = disabled (constant decay, legacy behaviour). Raise in small steps and watch Blackbox `axisI` for slow oscillation. |
 
 ### Tuning Guide
 
-**Starting point from an existing PID tune:**
+Tune in this order. `adrc_b0` is the load-bearing knob — get it in the right ballpark first, then shape the response.
 
-1. **`adrc_alpha_hat`** — `alpha_hat = adrc_kt / Kp` where `Kp = PTERM_SCALE × P_value = 0.032029 × P`.
-   For P=45: `alpha_hat = 60 / (0.032029 × 45) ≈ 42`.
+1. **`adrc_hover_throttle`** — hover the drone in PID mode, note the throttle stick percentage, enter that value.
 
-2. **`adrc_hover_throttle`** — hover the drone in PID mode, note the throttle stick percentage, and enter that value.
+2. **`adrc_b0`** — the plant gain, and the primary knob. Output gain is roughly `1/b0`, so **too LOW → too much gain → twitchy/oscillation; too HIGH → sluggish/mushy.** Start at the default, take a gentle hover, and adjust until the craft holds attitude crisply without buzzing. Tune roll/pitch together, yaw separately. (The degree-2 observer tolerates a fair amount of `b0` error, so you don't need it exact — just the right order of magnitude.)
 
-3. **`adrc_kd`** — start equal to your PID D values (`d_roll`, `d_pitch`). Raise to reduce propwash and roll/flip oscillations; lower if motors oscillate.
+3. **`adrc_ctrl_freq`** — controller bandwidth, i.e. how sharp/fast the response is (the P analogue). Raise for tighter tracking, lower for a softer feel. Keep it well below `adrc_eso_freq` (roughly ⅓–½) so the observer stays faster than the controller.
 
-4. **`adrc_kt`** — raise for sharper tracking (like raising P), lower for softer feel.
+4. **`adrc_eso_freq`** — observer bandwidth. Raise for faster disturbance/lag rejection and more robustness; lower if you get high-frequency buzz (gyro noise being amplified). Because the plant lag is modelled as observer state, an oscillation on sharp inputs is usually cured by *raising* `eso_freq` (or fixing `b0`), not lowering it.
 
-5. **`adrc_eso_freq`** — raise for faster disturbance rejection; if sigma_hat saturates or motors get warm, lower it. Start at 3–10 Hz.
+5. **`adrc_sigma_decay`** — raise (e.g. to 20–30) if motors stay hot or `z3` doesn't spin down when throttle is lowered.
 
-6. **`adrc_sigma_decay`** — raise (e.g. to 20–30) if motors stay hot or don't spin down when throttle is lowered.
+6. **`adrc_sigma_decay_sched`** — leave at `0` unless you have a genuinely sustained disturbance (bent frame, steady wind) that a fixed decay bleeds away too quickly. Raise in small steps and check Blackbox `axisI` doesn't develop a slow oscillation.
 
 **Blackbox verification:**
 
-- `axisD[0]` flat at 0 → ADRC is NOT running (still on PID)
-- `axisD[0]` non-zero → ADRC kd is active ✓
-- `axisI[0]` near ±sigma_limit constantly → increase `adrc_sigma_decay` or decrease `adrc_eso_freq`
+- `axisD[0]` / `axisI[0]` flat at 0 → ADRC is NOT running (still on PID)
+- `axisI[0]` = `−z3/b0` (disturbance cancellation); `axisD[0]` = `−kd·z2/b0` (damping of the estimated acceleration)
+- `axisI[0]` pinned near ±limit constantly → `b0` likely too low, or increase `adrc_sigma_decay`
+- Oscillation whose frequency *scales with* `adrc_eso_freq` → observer/plant mismatch: fix `adrc_b0` first, then adjust `eso_freq`
 
 ### Architecture
 
@@ -66,36 +70,30 @@ Switch back to PID at any time with `set controller_type = PID`. All other param
 pidLevel() / getSetpointRate()
          │  (angle/horizon/acro mode)
          ▼
-Tracking Differentiator ──► v_ref, v_ref_dot
-         │
-         ▼                                    [Blackbox]
-Control Law (Eq.15):  output = (1/α̂)(v_ref_dot + kt·error) − σ̂ − kd·gyro
-         │                                    P slot: tracking term
-         │                                    I slot: −sigma_hat
-gyro ──► Extended State Observer ──► σ̂       D slot: −kd·gyro
-         (throttle-scaled α̂)                 F slot: feedforward (TD)
+(optional Tracking Differentiator) ──► v_ref
+         │                                    [Blackbox]
+         ▼
+Control Law:  output = (kp·(v_ref − z1) − kd·z2 − z3) / b0_eff
+         │                                    P slot:  kp·(v_ref−z1)/b0
+         │                                    I slot: −z3/b0  (disturbance)
+gyro ──► 3-state ESO ──► z1 (rate)           D slot: −kd·z2/b0 (accel damping)
+         (degree-2;      z2 (accel)          F slot:  0
+          throttle-      z3 (disturbance)
+          scaled b0)
          │
          ▼
     pidData[].Sum ──► Mixer
 ```
 
-The ESO uses a throttle-dependent plant model (`alpha ∝ throttle²` above hover, constant below hover) so the controller gain stays correctly calibrated across the full throttle range.
+The ESO uses a throttle-dependent plant model (`b0 ∝ throttle²` above hover, constant below hover) so the control gain stays calibrated across the throttle range. All three observer poles are placed at `−ωₒ` (`ωₒ = 2π·adrc_eso_freq`), giving gains `[β1, β2, β3] = [3ωₒ, 3ωₒ², ωₒ³]`; the controller places a double pole at `−wc` (`wc = 2π·adrc_ctrl_freq`). Because the control `b0·u` enters the observer at the acceleration level (`z2`), the actuator/prop lag is captured as plant dynamics rather than misattributed to the disturbance `z3`.
 
-### Simulation
+### Testing
 
-A closed-loop Python simulation validates parameters before flying:
-
-```bash
-cd /workspaces/Betaflight
-python3 tools/adrc_simulation.py
-```
-
-Edit the `P` dict at the top of the script to match your CLI settings. The simulation runs 8 test scenarios including step response, disturbance rejection, model mismatch robustness, and a runaway check.
-
-A Blackbox log analyser is also included:
+The controller is covered by a unit-test suite ([`src/test/unit/adrc_unittest.cc`](src/test/unit/adrc_unittest.cc)) that verifies coefficient initialisation (β/kp/kd/b0), state reset, the zero-input/setpoint/disturbance responses, disturbance clamping, the decay schedule, the liftoff gate, and throttle scaling. Build and run it with:
 
 ```bash
-python3 tools/bbl_analyze.py path/to/log.BBL
+cd src/test
+make test_adrc_unittest
 ```
 
 ---

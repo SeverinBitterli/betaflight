@@ -120,7 +120,7 @@ PG_RESET_TEMPLATE(pidConfig_t, pidConfig,
 #define IS_AXIS_IN_ANGLE_MODE(i) false
 #endif // USE_ACC
 
-PG_REGISTER_ARRAY_WITH_RESET_FN(pidProfile_t, PID_PROFILE_COUNT, pidProfiles, PG_PID_PROFILE, 13);
+PG_REGISTER_ARRAY_WITH_RESET_FN(pidProfile_t, PID_PROFILE_COUNT, pidProfiles, PG_PID_PROFILE, 15);
 
 void resetPidProfile(pidProfile_t *pidProfile)
 {
@@ -259,12 +259,12 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .chirp_frequency_end_deci_hz = 6000,
         .chirp_time_seconds = 20,
         .controller_type = CONTROLLER_PID,
-        .adrc_eso_freq = 20,
+        .adrc_eso_freq = 20,            // observer bandwidth ~20 Hz (wo≈126 rad/s)
         .adrc_td_freq = 0,
-        .adrc_kt = { 60, 60, 40 },
-        .adrc_alpha_hat = { 40, 40, 30 },
-        .adrc_kd = { 20, 25, 0 },
+        .adrc_ctrl_freq = { 6, 6, 5 },  // controller bandwidth per axis (Hz)
+        .adrc_b0 = { 140, 140, 160 },   // plant gain: b0 = value*20; MUST be tuned to the craft
         .adrc_sigma_decay = 3,
+        .adrc_sigma_decay_sched = 0,
         .adrc_hover_throttle = 45,
     );
 }
@@ -1188,12 +1188,21 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         for (int axis = FD_ROLL; axis <= FD_YAW; ++axis) {
             float sp = getSetpointRate(axis);
 #if defined(USE_ACC)
+            pidRuntime.axisInAngleMode[axis] = false;
             if ((levelMode == LEVEL_MODE_RP && (axis == FD_ROLL || axis == FD_PITCH)) ||
                 (levelMode == LEVEL_MODE_R  &&  axis == FD_ROLL)) {
+                // Convert the angle/horizon-mode stick (an angle target) into a
+                // rate setpoint the ADRC rate loop tracks. Flag the axis so
+                // Blackbox/tooling reflect that it is under attitude control.
+                pidRuntime.axisInAngleMode[axis] = true;
                 sp = pidLevel(axis, pidProfile, angleTrim, sp, horizonLevelStrength);
             }
 #endif
             adrcRuntime.setpoint[axis] = sp;
+            // ADRC bypasses the classic PID loop, which is the only place
+            // previousPidSetpoint[] normally gets written — without this,
+            // Blackbox's "setpoint" field silently logs 0 for the whole flight.
+            pidRuntime.previousPidSetpoint[axis] = sp;
         }
         adrcController(pidProfile, currentTimeUs);
         if (!pidRuntime.pidStabilisationEnabled || gyroOverflowDetected()) {

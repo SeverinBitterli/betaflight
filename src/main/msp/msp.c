@@ -2115,12 +2115,12 @@ case MSP_NAME:
         sbufWriteU8(dst, currentPidProfile->controller_type);
         sbufWriteU8(dst, currentPidProfile->adrc_eso_freq);
         sbufWriteU8(dst, currentPidProfile->adrc_td_freq);
-        sbufWriteU8(dst, currentPidProfile->adrc_kt[FD_ROLL]);
-        sbufWriteU8(dst, currentPidProfile->adrc_kt[FD_PITCH]);
-        sbufWriteU8(dst, currentPidProfile->adrc_kt[FD_YAW]);
-        sbufWriteU8(dst, currentPidProfile->adrc_alpha_hat[FD_ROLL]);
-        sbufWriteU8(dst, currentPidProfile->adrc_alpha_hat[FD_PITCH]);
-        sbufWriteU8(dst, currentPidProfile->adrc_alpha_hat[FD_YAW]);
+        sbufWriteU8(dst, currentPidProfile->adrc_ctrl_freq[FD_ROLL]);
+        sbufWriteU8(dst, currentPidProfile->adrc_ctrl_freq[FD_PITCH]);
+        sbufWriteU8(dst, currentPidProfile->adrc_ctrl_freq[FD_YAW]);
+        sbufWriteU8(dst, currentPidProfile->adrc_b0[FD_ROLL]);
+        sbufWriteU8(dst, currentPidProfile->adrc_b0[FD_PITCH]);
+        sbufWriteU8(dst, currentPidProfile->adrc_b0[FD_YAW]);
         sbufWriteU8(dst, currentPidProfile->adrc_hover_throttle);
         break;
 
@@ -3535,12 +3535,12 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
             currentPidProfile->adrc_td_freq    = sbufReadU8(src);
         }
         if (sbufBytesRemaining(src) >= 6) {
-            currentPidProfile->adrc_kt[FD_ROLL]          = sbufReadU8(src);
-            currentPidProfile->adrc_kt[FD_PITCH]         = sbufReadU8(src);
-            currentPidProfile->adrc_kt[FD_YAW]           = sbufReadU8(src);
-            currentPidProfile->adrc_alpha_hat[FD_ROLL]   = sbufReadU8(src);
-            currentPidProfile->adrc_alpha_hat[FD_PITCH]  = sbufReadU8(src);
-            currentPidProfile->adrc_alpha_hat[FD_YAW]    = sbufReadU8(src);
+            currentPidProfile->adrc_ctrl_freq[FD_ROLL]   = sbufReadU8(src);
+            currentPidProfile->adrc_ctrl_freq[FD_PITCH]  = sbufReadU8(src);
+            currentPidProfile->adrc_ctrl_freq[FD_YAW]    = sbufReadU8(src);
+            currentPidProfile->adrc_b0[FD_ROLL]          = sbufReadU8(src);
+            currentPidProfile->adrc_b0[FD_PITCH]         = sbufReadU8(src);
+            currentPidProfile->adrc_b0[FD_YAW]           = sbufReadU8(src);
         }
         if (sbufBytesRemaining(src) >= 1) {
             currentPidProfile->adrc_hover_throttle = sbufReadU8(src);
